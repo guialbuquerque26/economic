@@ -24,7 +24,7 @@ class SecaoGastos extends StatelessWidget {
           ListaValores(valores: gastos, deCategorias: true),
           if (internas.isNotEmpty) ...[
             const SizedBox(height: Espaco.medio),
-            Text('Fora dos gastos (suas contas e investimentos)', style: subtitulo),
+            Text('Fora dos gastos', style: subtitulo),
             const SizedBox(height: Espaco.pequeno + Espaco.minimo),
             ListaValores(valores: internas),
           ],

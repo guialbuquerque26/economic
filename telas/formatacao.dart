@@ -100,7 +100,8 @@ List<String> _partesDaFrase(String frase) {
   return [...trechos.take(trechos.length - 1), ...trechos.last.split(RegExp(r'(?<=\.)\s+(?=[A-ZÀ-Ú])'))];
 }
 
-final _ligacaoNoFim = RegExp(r'(\s+(em|de|para|por)(\s+cerca\s+de)?|:)\s*$');
+// O fecho de um negrito ("**Tesouro Selic:**") fica: só a ligação sai.
+final _ligacaoNoFim = RegExp(r'(\s+(em|de|para|por)(\s+cerca\s+de)?|:)(\**)\s*$');
 
 LinhaDaDica _lerLinha(String linha) {
   final categoria = RegExp('[“"]([^”"]+)[”"]').firstMatch(linha)?[1];
@@ -109,7 +110,7 @@ LinhaDaDica _lerLinha(String linha) {
   final fechaAFrase = valor != null && RegExp(r'^\.?$').hasMatch(texto.substring(valor.end));
   if (!fechaAFrase) return (texto: maiusculaInicial(texto), categoria: categoria, valor: null);
   // O valor vai para a coluna da direita: sem ligação solta como "Cortar Lazer em".
-  final inicio = texto.substring(0, valor.start).replaceFirst(_ligacaoNoFim, '').trim();
+  final inicio = texto.substring(0, valor.start).replaceFirstMapped(_ligacaoNoFim, (achado) => achado[4]!).trim();
   return (texto: maiusculaInicial(inicio), categoria: categoria, valor: valor[0]);
 }
 
@@ -131,7 +132,8 @@ String resumoDaDica(String? titulo, String texto) {
   if (linhas.isEmpty) return titulo ?? '';
   final linha = linhas.first;
   final frase = linha.valor == null ? linha.texto : '${linha.texto}: ${linha.valor}.';
-  return titulo == null ? frase : '$titulo. $frase';
+  final semMarcas = frase.replaceFirst(RegExp(r'^#+\s*'), '').replaceAll(RegExp(r'\*|__'), ''); // vai em texto simples
+  return titulo == null ? semMarcas : '$titulo. $semMarcas';
 }
 
 /// Como chamar a pessoa no app: o nome que ela preferiu ou, sem ele, o primeiro nome.

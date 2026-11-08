@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'estado_financas.dart';
 import 'formatacao.dart';
@@ -50,6 +51,122 @@ Future<Map<String, String>?> perguntarFonte(BuildContext context, List<Dados> pe
     escolhas[instituicao] = escolha;
   }
   return escolhas;
+}
+
+/// Marca do banco em disco, com o SVG que o serviço entrega; sem imagem, a inicial do nome.
+class _LogotipoDoBanco extends StatelessWidget {
+  const _LogotipoDoBanco({required this.rotulo, this.imagem});
+
+  static const _tamanho = 40.0;
+
+  final String rotulo;
+  final String? imagem;
+
+  @override
+  Widget build(BuildContext context) {
+    final inicial = Center(
+      child: Text(
+        rotulo.isEmpty ? '?' : rotulo[0].toUpperCase(),
+        style: Theme.of(context).textTheme.titleSmall,
+      ),
+    );
+    return Container(
+      width: _tamanho,
+      height: _tamanho,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surfaceContainerHigh, shape: BoxShape.circle),
+      child: imagem == null
+          ? inicial
+          : SvgPicture.string(
+              imagem!,
+              width: _tamanho,
+              height: _tamanho,
+              fit: BoxFit.cover,
+              placeholderBuilder: (_) => inicial,
+              errorBuilder: (_, __, ___) => inicial,
+            ),
+    );
+  }
+}
+
+/// Um banco conectado: marca, situação e a chave para receber ou pausar.
+class _CartaoDoBanco extends StatelessWidget {
+  const _CartaoDoBanco({
+    required this.banco,
+    required this.ultimaBusca,
+    required this.habilitado,
+    required this.aoMudar,
+  });
+
+  static const _opacidadePausado = 0.45;
+
+  final Dados banco;
+  final String? ultimaBusca;
+  final bool habilitado;
+  final ValueChanged<bool> aoMudar;
+
+  bool get _pausado => banco['pausado'] as bool;
+  bool get _semResposta => banco['sem_resposta'] as bool;
+
+  String get _situacao {
+    if (_semResposta) return 'Sem resposta do banco · confira no Meu Pluggy';
+    if (_pausado) return 'Pausado · histórico continua no painel';
+    return ultimaBusca == null
+        ? 'Recebendo · nenhuma busca feita ainda'
+        : 'Recebendo · última busca em ${formatarData(ultimaBusca!)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cores = Theme.of(context).colorScheme;
+    final textos = Theme.of(context).textTheme;
+    final rotulo = banco['rotulo'] as String;
+    return Cartao(
+      preenchimento: const EdgeInsets.symmetric(horizontal: Espaco.grande, vertical: Espaco.medio),
+      filho: Row(
+        children: [
+          AnimatedOpacity(
+            opacity: _pausado ? _opacidadePausado : 1,
+            duration: Movimento.de(context, Movimento.rapido),
+            child: _LogotipoDoBanco(rotulo: rotulo, imagem: banco['imagem'] as String?),
+          ),
+          const SizedBox(width: Espaco.pequeno + Espaco.minimo),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(rotulo, style: textos.titleSmall),
+                Row(
+                  children: [
+                    if (_semResposta) ...[
+                      Icon(Icons.error_outline_rounded, size: 16, color: cores.error),
+                      const SizedBox(width: Espaco.minimo),
+                    ],
+                    Flexible(
+                      child: Text(
+                        _situacao,
+                        style: textos.bodySmall?.copyWith(color: _semResposta ? cores.error : cores.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: Espaco.pequeno),
+          Semantics(
+            label: 'Receber movimentações de $rotulo',
+            child: Switch(
+              value: !_pausado,
+              inactiveTrackColor: cores.outline,
+              inactiveThumbColor: cores.surface,
+              onChanged: habilitado ? aoMudar : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Conexão opcional com o banco: passo a passo para quem ainda não conectou e, depois, a situação da conexão.
@@ -141,6 +258,17 @@ class _EstadoTelaConexao extends State<TelaConexao> {
     if (confirmado == true) await _avisar(_estado.desconectar());
   }
 
+  /// A chave mostra o que veio do serviço: se a escolha não for salva, ela continua onde estava.
+  Future<void> _mudarBanco(String nome, bool receber) async {
+    final erro = await _estado.pausarBanco(nome, !receber);
+    if (!mounted) return;
+    if (erro != null) {
+      await _avisar(Future.value(erro));
+      return;
+    }
+    await _avisar(_estado.buscarConexao(_perguntar));
+  }
+
   Widget _passo(int numero, String texto, String? endereco) {
     final textos = Theme.of(context).textTheme;
     return Padding(
@@ -150,9 +278,11 @@ class _EstadoTelaConexao extends State<TelaConexao> {
           SizedBox(width: Espaco.grande, child: Text('$numero.', style: textos.titleSmall)),
           Expanded(child: Text(texto, style: textos.bodyMedium)),
           if (endereco != null)
-            TextButton(
-              onPressed: () => Process.run('explorer', [endereco]), // abre o navegador padrão do Windows
-              child: const Text('Abrir site'),
+            MolaAoPressionar(
+              child: TextButton(
+                onPressed: () => Process.run('explorer', [endereco]), // abre o navegador padrão do Windows
+                child: const Text('Abrir site'),
+              ),
             ),
         ],
       ),
@@ -171,52 +301,53 @@ class _EstadoTelaConexao extends State<TelaConexao> {
   Widget _passoAPasso(bool ocupado) {
     final cores = Theme.of(context).colorScheme;
     final textos = Theme.of(context).textTheme;
-    return Secao(
-      titulo: 'Conecte seu banco',
-      filho: Form(
-        key: _formulario,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Esta opção é para quem prefere não importar extratos. Ela usa uma conta sua no Meu Pluggy, '
-              'gratuita para uso pessoal, e você pode conectar até $_maximoDeConexoes bancos no seu nome.',
-              style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
-            ),
-            const SizedBox(height: Espaco.medio),
-            for (final (indice, passo) in _passos.indexed) _passo(indice + 1, passo.texto, passo.endereco),
-            const SizedBox(height: Espaco.medio),
-            _campo(_clientId, 'Client ID'),
-            const SizedBox(height: Espaco.medio),
-            _campo(_clientSecret, 'Client Secret', oculto: true),
-            const SizedBox(height: Espaco.medio),
-            TextFormField(
-              controller: _codigos,
-              maxLines: _maximoDeConexoes,
-              minLines: 2,
-              autocorrect: false,
-              validator: _validarCodigos,
-              decoration: const InputDecoration(
-                labelText: 'Códigos das conexões',
-                helperText: 'Use os códigos do painel, um por linha, até $_maximoDeConexoes.',
-                alignLabelWithHint: true,
+    return EntradaSuave(
+      child: Secao(
+        titulo: 'Conecte seu banco',
+        filho: Form(
+          key: _formulario,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Para quem prefere não importar extratos. Usa uma conta sua no Meu Pluggy, gratuita para uso '
+                'pessoal, com até $_maximoDeConexoes bancos no seu nome.',
+                style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
               ),
-            ),
-            const SizedBox(height: Espaco.medio),
-            Text(
-              'Seus dados de acesso ficam protegidos na nuvem e servem apenas para buscar suas movimentações. '
-              'Você pode desconectar quando quiser.',
-              style: textos.bodySmall?.copyWith(color: cores.onSurfaceVariant),
-            ),
-            const SizedBox(height: Espaco.grande),
-            Align(
-              alignment: Alignment.centerRight,
-              child: MolaAoPressionar(
-                ativa: !ocupado,
-                child: FilledButton(onPressed: ocupado ? null : _conectar, child: const Text('Conectar')),
+              const SizedBox(height: Espaco.medio),
+              for (final (indice, passo) in _passos.indexed) _passo(indice + 1, passo.texto, passo.endereco),
+              const SizedBox(height: Espaco.medio),
+              _campo(_clientId, 'Client ID'),
+              const SizedBox(height: Espaco.medio),
+              _campo(_clientSecret, 'Client Secret', oculto: true),
+              const SizedBox(height: Espaco.medio),
+              TextFormField(
+                controller: _codigos,
+                maxLines: _maximoDeConexoes,
+                minLines: 2,
+                autocorrect: false,
+                validator: _validarCodigos,
+                decoration: const InputDecoration(
+                  labelText: 'Códigos das conexões',
+                  helperText: 'Um código por linha, até $_maximoDeConexoes.',
+                  alignLabelWithHint: true,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: Espaco.medio),
+              Text(
+                'Seus dados de acesso ficam protegidos na nuvem e servem apenas para buscar suas movimentações.',
+                style: textos.bodySmall?.copyWith(color: cores.onSurfaceVariant),
+              ),
+              const SizedBox(height: Espaco.grande),
+              Align(
+                alignment: Alignment.centerRight,
+                child: MolaAoPressionar(
+                  ativa: !ocupado,
+                  child: FilledButton(onPressed: ocupado ? null : _conectar, child: const Text('Conectar')),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -225,82 +356,106 @@ class _EstadoTelaConexao extends State<TelaConexao> {
   Widget _situacao(Dados conexao, bool ocupado) {
     final cores = Theme.of(context).colorScheme;
     final textos = Theme.of(context).textTheme;
-    final ultima = conexao['ultima_busca'] as String?;
+    final bancos = List<Dados>.from(conexao['bancos'] as List);
     final meses = List<String>.from(conexao['meses_ignorados'] as List);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Secao(
-          titulo: 'Sua conexão',
-          filho: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final instituicao in List<String>.from(conexao['instituicoes'] as List))
-                Text(instituicao, style: textos.titleSmall),
-              const SizedBox(height: Espaco.pequeno),
-              Text(
-                ultima == null ? 'Nenhuma busca feita ainda.' : 'Última busca em ${formatarData(ultima)}',
-                style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
-              ),
-              const SizedBox(height: Espaco.medio),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(onPressed: ocupado ? null : _desconectar, child: const Text('Desconectar')),
-              ),
-            ],
+        for (final (ordem, banco) in bancos.indexed) ...[
+          EntradaSuave(
+            ordem: ordem,
+            child: _CartaoDoBanco(
+              banco: banco,
+              ultimaBusca: conexao['ultima_busca'] as String?,
+              habilitado: !ocupado,
+              aoMudar: (receber) => _mudarBanco(banco['nome'] as String, receber),
+            ),
           ),
-        ),
-        const SizedBox(height: Espaco.medio),
-        Secao(
-          titulo: 'Adicionar outro banco',
-          filho: Form(
-            key: _formularioDoBanco,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+          const SizedBox(height: Espaco.medio),
+        ],
+        EntradaSuave(
+          ordem: bancos.length,
+          child: Cartao(
+            preenchimento: const EdgeInsets.symmetric(horizontal: Espaco.grande, vertical: Espaco.pequeno),
+            filho: Row(
               children: [
-                Text(
-                  'Conectou outro banco no Meu Pluggy? No painel da Pluggy, abra a página Demo, clique em Conectar '
-                  'Conta e escolha MeuPluggy. Depois, copie o código dele em Itens Conectados.',
-                  style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
-                ),
-                const SizedBox(height: Espaco.medio),
-                TextFormField(
-                  controller: _codigoNovo,
-                  autocorrect: false,
-                  validator: (texto) =>
-                      _codigoDeConexao.hasMatch(texto!.trim()) ? null : 'Confira o código copiado.',
-                  decoration: const InputDecoration(labelText: 'Código da conexão'),
-                ),
-                const SizedBox(height: Espaco.medio),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: ocupado ? null : _adicionarBanco,
-                    child: const Text('Adicionar banco'),
+                Expanded(
+                  child: Text(
+                    'Sua conexão com o Meu Pluggy',
+                    style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
                   ),
+                ),
+                MolaAoPressionar(
+                  ativa: !ocupado,
+                  child: TextButton(onPressed: ocupado ? null : _desconectar, child: const Text('Desconectar tudo')),
                 ),
               ],
             ),
           ),
         ),
+        const SizedBox(height: Espaco.medio),
+        EntradaSuave(
+          ordem: bancos.length + 1,
+          child: Secao(
+            titulo: 'Adicionar outro banco',
+            filho: Form(
+              key: _formularioDoBanco,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'No painel da Pluggy, abra a página Demo, clique em Conectar Conta e escolha MeuPluggy. Depois, '
+                    'copie o código em Itens Conectados.',
+                    style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: Espaco.medio),
+                  TextFormField(
+                    controller: _codigoNovo,
+                    autocorrect: false,
+                    validator: (texto) =>
+                        _codigoDeConexao.hasMatch(texto!.trim()) ? null : 'Confira o código copiado.',
+                    decoration: const InputDecoration(labelText: 'Código da conexão'),
+                  ),
+                  const SizedBox(height: Espaco.medio),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: MolaAoPressionar(
+                      ativa: !ocupado,
+                      child: FilledButton(
+                        onPressed: ocupado ? null : _adicionarBanco,
+                        child: const Text('Adicionar banco'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
         if (meses.isNotEmpty) ...[
           const SizedBox(height: Espaco.medio),
-          Secao(
-            titulo: 'Meses que não buscamos',
-            filho: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final mes in meses)
-                  Row(
-                    children: [
-                      Expanded(child: Text(formatarMesPorExtenso(mes), style: textos.bodyMedium)),
-                      TextButton(
-                        onPressed: ocupado ? null : () => _avisar(_estado.voltarABuscar(mes)),
-                        child: const Text('Voltar a buscar'),
-                      ),
-                    ],
-                  ),
-              ],
+          EntradaSuave(
+            ordem: bancos.length + 2,
+            child: Secao(
+              titulo: 'Meses que não buscamos',
+              filho: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final mes in meses)
+                    Row(
+                      children: [
+                        Expanded(child: Text(formatarMesPorExtenso(mes), style: textos.bodyMedium)),
+                        MolaAoPressionar(
+                          ativa: !ocupado,
+                          child: TextButton(
+                            onPressed: ocupado ? null : () => _avisar(_estado.voltarABuscar(mes)),
+                            child: const Text('Voltar a buscar'),
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -315,17 +470,36 @@ class _EstadoTelaConexao extends State<TelaConexao> {
       builder: (context, _) {
         final conexao = _estado.conexao;
         return Scaffold(
-          appBar: AppBar(title: const Text('Conexão com o banco')),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(Espaco.grande, Espaco.pequeno, Espaco.grande, Espaco.grande),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: _larguraDaTela),
-                child: _estado.conexaoAtiva
-                    ? _situacao(conexao!, _estado.carregando)
-                    : _passoAPasso(_estado.carregando),
+          appBar: AppBar(
+            title: const Text('Conexão com o banco'),
+            bottom: BarraDeCarregamento(ativa: _estado.carregando),
+          ),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              const FundoDeOndas(),
+              SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(Espaco.grande, Espaco.pequeno, Espaco.grande, Espaco.grande),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: _larguraDaTela),
+                    child: AnimatedSwitcher(
+                      duration: Movimento.de(context, Movimento.medio),
+                      layoutBuilder: (atual, anteriores) => Stack(
+                        alignment: Alignment.topCenter,
+                        children: [...anteriores, if (atual != null) atual],
+                      ),
+                      child: KeyedSubtree(
+                        key: ValueKey(_estado.conexaoAtiva),
+                        child: _estado.conexaoAtiva
+                            ? _situacao(conexao!, _estado.carregando)
+                            : _passoAPasso(_estado.carregando),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         );
       },

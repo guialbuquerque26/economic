@@ -37,6 +37,16 @@ abstract final class Movimento {
       MediaQuery.disableAnimationsOf(context) ? Duration.zero : duracao;
 }
 
+/// Carteirinha do pin do consultor. É identidade, como os logotipos dos bancos: as mesmas cores nos dois temas.
+abstract final class CoresDoPin {
+  static const corpo = Color(0xFFFF6A3D);
+  static const aba = Color(0xFFE5552A);
+  static const fecho = Color(0xFFBF3A12);
+  static const rosado = Color(0xFFFFB49A);
+  static const tinta = Color(0xFF2A1208);
+  static const creme = Color(0xFFFFF4E6);
+}
+
 /// Algarismos de largura fixa: valores alinham em coluna.
 const algarismosAlinhados = [FontFeature.tabularFigures()];
 
@@ -96,6 +106,11 @@ List<BoxShadow> sombraDoCartao(Brightness brilho) => [
         blurRadius: 24,
       ),
     ];
+
+/// Ondas do fundo da entrada, a de trás e a da frente. No claro, Trilho e Borda sumiriam sobre o creme.
+(Color, Color) coresDasOndas(Brightness brilho) => brilho == Brightness.light
+    ? (const Color(0xFFF5DEC3), const Color(0xFFEBCBA6))
+    : (const Color(0xFF3B302A), const Color(0xFF473A33));
 
 TextTheme _textos(TextTheme base, Color cor) {
   TextStyle? estilo(TextStyle? origem, double tamanho, FontWeight peso, {double altura = 1.3}) =>
@@ -240,6 +255,7 @@ ThemeData temaDoApp(Brightness brilho) {
       subtitleTextStyle: textos.bodySmall?.copyWith(color: secundario),
     ),
     dialogTheme: DialogThemeData(
+      constraints: const BoxConstraints(minWidth: 280, maxWidth: 480), // sem limite, o texto ocupa a janela toda
       backgroundColor: cartao,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Raio.grande)),

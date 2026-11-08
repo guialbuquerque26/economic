@@ -31,6 +31,7 @@ REGRAS_INICIAIS = {
     "PAG FATURA": "Fatura do cartão",
     "VALOR ADICIONADO NA CONTA POR CARTAO DE CREDITO": "Fatura do cartão",
     "PAO DE ACUCAR": "Alimentação",
+    "SUPERFRANGOLANDIA": "Alimentação",
     "IFOOD": "Alimentação",
     "ENEL DISTRIBUICAO": "Contas da casa",
     "TELECOM": "Contas da casa",

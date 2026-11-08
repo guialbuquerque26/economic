@@ -19,13 +19,22 @@ Dados? conselhoDoMes(Dados dica) {
 
 /// Últimas dicas da IA para o mês escolhido, agrupadas por tipo, com ícone próprio.
 class SecaoDicas extends StatelessWidget {
-  const SecaoDicas(
-      {super.key, required this.dicas, required this.mes, required this.habilitado, required this.aoGerar});
+  const SecaoDicas({
+    super.key,
+    required this.dicas,
+    required this.mes,
+    required this.habilitado,
+    required this.aoGerar,
+    this.aoConversar,
+  });
 
   final List<Dados> dicas;
   final String mes;
   final bool habilitado;
   final VoidCallback aoGerar;
+
+  /// Abre o consultor. Não depende de [habilitado]: a conversa não usa o estado ocupado do painel.
+  final VoidCallback? aoConversar;
 
   @override
   Widget build(BuildContext context) {
@@ -59,8 +68,7 @@ class SecaoDicas extends StatelessWidget {
         children: [
           if (ultima == null)
             Text(
-              'Ainda não há dicas para ${formatarMesPorExtenso(mes)}. Clique em "Gerar dicas" para saber onde '
-              'economizar e o que fazer com o seu saldo.',
+              'Ainda não há dicas para ${formatarMesPorExtenso(mes)}.',
               style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
             )
           else ...[
@@ -70,6 +78,20 @@ class SecaoDicas extends StatelessWidget {
             Text(
               'Geradas pela IA em ${formatarData(ultima['criada_em'] as String)}',
               style: textos.bodySmall?.copyWith(color: cores.onSurfaceVariant),
+            ),
+          ],
+          // No fim do cartão, e não no título: ao lado de "Gerar de novo" o título seria cortado.
+          if (aoConversar != null) ...[
+            const SizedBox(height: Espaco.pequeno),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: MolaAoPressionar(
+                child: TextButton.icon(
+                  onPressed: aoConversar,
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                  label: const Text('Conversar com o consultor'),
+                ),
+              ),
             ),
           ],
         ],
@@ -171,33 +193,56 @@ class _ItemDaDica extends StatelessWidget {
               ],
             ),
           if (linhas.length == 1)
-            _TextoDaDica(linhas.single.texto)
+            TextoDaDica(linhas.single.texto)
           else
-            for (final linha in linhas) _LinhaDaLista(linha),
+            for (final linha in linhas) LinhaDaLista(linha),
         ],
       ),
     );
   }
 }
 
-/// Texto da IA com os valores em destaque. Dá para selecionar e copiar.
-class _TextoDaDica extends StatelessWidget {
-  const _TextoDaDica(this.texto);
+/// Texto da IA com os valores em destaque. Dá para selecionar e copiar. Usado também pelo consultor.
+/// A IA às vezes escreve em markdown: "**Rendimento:**" e "## Título" viram negrito, e os símbolos somem.
+class TextoDaDica extends StatelessWidget {
+  const TextoDaDica(this.texto, {super.key});
 
   final String texto;
 
-  @override
-  Widget build(BuildContext context) {
+  static const _negrito = TextStyle(fontWeight: FontWeight.w700);
+  static final _titulo = RegExp(r'^\s*#{1,6}\s+');
+  static final _trechoEmNegrito = RegExp(r'\*\*(.+?)\*\*|__(.+?)__');
+
+  /// Um trecho sem marcações, com os valores em destaque.
+  static List<TextSpan> _comValores(String trecho, {required bool negrito}) {
     const destaque = TextStyle(fontWeight: FontWeight.w700, fontFeatures: algarismosAlinhados);
+    final base = negrito ? _negrito : null;
     final trechos = <TextSpan>[];
     var posicao = 0;
-    for (final valor in valorNoTexto.allMatches(texto)) {
-      trechos
-        ..add(TextSpan(text: texto.substring(posicao, valor.start)))
-        ..add(TextSpan(text: valor[0], style: destaque));
+    for (final valor in valorNoTexto.allMatches(trecho)) {
+      if (valor.start > posicao) trechos.add(TextSpan(text: trecho.substring(posicao, valor.start), style: base));
+      trechos.add(TextSpan(text: valor[0], style: destaque));
       posicao = valor.end;
     }
-    trechos.add(TextSpan(text: texto.substring(posicao)));
+    if (posicao < trecho.length) trechos.add(TextSpan(text: trecho.substring(posicao), style: base));
+    return trechos;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titulo = _titulo.hasMatch(texto);
+    final limpo = texto.replaceFirst(_titulo, '');
+    final trechos = <TextSpan>[];
+    var posicao = 0;
+    // Asterisco solto (itálico ou marcação quebrada) não aparece.
+    String semMarcas(String trecho) => trecho.replaceAll('*', '');
+    for (final achado in _trechoEmNegrito.allMatches(limpo)) {
+      trechos
+        ..addAll(_comValores(semMarcas(limpo.substring(posicao, achado.start)), negrito: titulo))
+        ..addAll(_comValores(semMarcas(achado[1] ?? achado[2]!), negrito: true));
+      posicao = achado.end;
+    }
+    trechos.addAll(_comValores(semMarcas(limpo.substring(posicao)), negrito: titulo));
     return SelectableText.rich(
       TextSpan(children: trechos),
       style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.4),
@@ -206,8 +251,8 @@ class _TextoDaDica extends StatelessWidget {
 }
 
 /// Item de lista dentro de uma dica: bolinha da categoria citada, texto e, à direita, o valor que fecha a frase.
-class _LinhaDaLista extends StatelessWidget {
-  const _LinhaDaLista(this.linha);
+class LinhaDaLista extends StatelessWidget {
+  const LinhaDaLista(this.linha, {super.key});
 
   final LinhaDaDica linha;
 
@@ -225,7 +270,7 @@ class _LinhaDaLista extends StatelessWidget {
             Padding(padding: const EdgeInsets.only(top: 5), child: PontoDeCor(corDoPonto)),
             const SizedBox(width: Espaco.pequeno),
           ],
-          Expanded(child: _TextoDaDica(linha.texto)),
+          Expanded(child: TextoDaDica(linha.texto)),
           if (linha.valor != null) ...[
             const SizedBox(width: Espaco.pequeno),
             Text(

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
@@ -63,7 +64,7 @@ class Secao extends StatelessWidget {
   }
 }
 
-/// Logotipo do app: a mesma letra do ícone do instalador, ao lado do nome.
+/// Logotipo do app: a carteira do ícone do instalador, ao lado do nome.
 class Marca extends StatelessWidget {
   const Marca({super.key, this.tamanho = 32, this.estilo, this.comNome = true});
 
@@ -77,18 +78,34 @@ class Marca extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: tamanho,
-          height: tamanho,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(color: cores.primary, borderRadius: BorderRadius.circular(tamanho * 0.32)),
-          child:
-              Text('E', style: TextStyle(color: cores.onPrimary, fontWeight: FontWeight.w800, fontSize: tamanho * 0.6)),
-        ),
+        CustomPaint(size: Size.square(tamanho), painter: _Carteira(cores.primary, cores.onPrimary)),
         if (comNome) ...[SizedBox(width: tamanho * 0.3), Text('Economic', style: estilo)],
       ],
     );
   }
+}
+
+/// Quadrado coral com a silhueta da carteira. Frações do lado iguais às de instalador/gerar_imagens.py.
+class _Carteira extends CustomPainter {
+  _Carteira(this.fundo, this.desenho);
+
+  final Color fundo;
+  final Color desenho;
+
+  @override
+  void paint(Canvas canvas, Size tamanho) {
+    canvas.scale(tamanho.shortestSide);
+    void bloco(double esquerda, double topo, double direita, double base, double raio, Color cor) =>
+        canvas.drawRRect(RRect.fromLTRBR(esquerda, topo, direita, base, Radius.circular(raio)), Paint()..color = cor);
+    bloco(0, 0, 1, 1, 0.3, fundo);
+    bloco(0.24, 0.24, 0.70, 0.40, 0.06, desenho); // verso
+    bloco(0.18, 0.32, 0.82, 0.78, 0.12, desenho); // corpo
+    bloco(0.56, 0.46, 0.90, 0.64, 0.09, fundo); // fecho, recortando o corpo
+    canvas.drawCircle(const Offset(0.68, 0.55), 0.045, Paint()..color = desenho);
+  }
+
+  @override
+  bool shouldRepaint(_Carteira antiga) => antiga.fundo != fundo || antiga.desenho != desenho;
 }
 
 /// Mola suave ao pressionar: o botão afunda um pouco e volta. Não anima na entrada.
@@ -344,25 +361,109 @@ class AvisoDePrivacidade extends StatelessWidget {
   }
 }
 
+/// Linha fina sob a barra do topo enquanto o app trabalha. Guarda o espaço para a tela não pular.
+class BarraDeCarregamento extends StatelessWidget implements PreferredSizeWidget {
+  const BarraDeCarregamento({super.key, required this.ativa});
+
+  final bool ativa;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(3);
+
+  @override
+  Widget build(BuildContext context) => SizedBox(height: 3, child: ativa ? const LinearProgressIndicator() : null);
+}
+
+/// Duas ondas lentas na base da janela, lembrando a linha de um saldo. Paradas se as animações estiverem desligadas.
+class FundoDeOndas extends StatefulWidget {
+  const FundoDeOndas({super.key});
+
+  @override
+  State<FundoDeOndas> createState() => _EstadoFundoDeOndas();
+}
+
+class _EstadoFundoDeOndas extends State<FundoDeOndas> with SingleTickerProviderStateMixin {
+  late final _tempo = AnimationController(vsync: this, duration: const Duration(seconds: 24));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _tempo.stop();
+    } else if (!_tempo.isAnimating) {
+      _tempo.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _tempo.dispose();
+    super.dispose();
+  }
+
+  // O limite de pintura poupa o conteúdo da tela de ser redesenhado a cada quadro.
+  @override
+  Widget build(BuildContext context) => RepaintBoundary(
+        child: CustomPaint(painter: _PintorDeOndas(_tempo, coresDasOndas(Theme.of(context).brightness))),
+      );
+}
+
+class _PintorDeOndas extends CustomPainter {
+  _PintorDeOndas(this.tempo, this.cores) : super(repaint: tempo);
+
+  final Animation<double> tempo;
+  final (Color, Color) cores;
+
+  /// Voltas inteiras por ciclo: o fim emenda no começo sem salto.
+  void _pintarOnda(Canvas canvas, Size tamanho, Color cor, double altura, int voltas, double desvio) {
+    final fase = tempo.value * 2 * math.pi * voltas + desvio;
+    final onda = Path()..moveTo(0, tamanho.height);
+    for (var x = 0.0; x <= tamanho.width + 4; x += 4) {
+      final posicao = x / tamanho.width;
+      final y = altura + tamanho.height * (0.04 * math.sin(posicao * 5 + fase) + 0.02 * math.sin(posicao * 11 - fase));
+      onda.lineTo(x, y);
+    }
+    onda
+      ..lineTo(tamanho.width + 4, tamanho.height)
+      ..close();
+    canvas.drawPath(onda, Paint()..color = cor);
+  }
+
+  @override
+  void paint(Canvas canvas, Size tamanho) {
+    final (atras, frente) = cores;
+    _pintarOnda(canvas, tamanho, atras, tamanho.height * 0.64, 1, 0);
+    _pintarOnda(canvas, tamanho, frente, tamanho.height * 0.78, 2, 2);
+  }
+
+  @override
+  bool shouldRepaint(_PintorDeOndas antigo) => antigo.cores != cores;
+}
+
 /// Largura da coluna de valores: etiquetas e porcentagens ficam alinhadas seja qual for o número.
 const larguraDoValor = 104.0;
 
 /// Rolagem lateral que também funciona com mouse comum: barra sempre à vista e arraste.
 class RolagemHorizontal extends StatefulWidget {
-  const RolagemHorizontal({super.key, required this.child});
+  const RolagemHorizontal({super.key, required this.child, this.controle});
 
   final Widget child;
+
+  /// Para quem precisa mover a rolagem (o giro dos investimentos); sem ele, a rolagem cria e descarta o próprio.
+  final ScrollController? controle;
 
   @override
   State<RolagemHorizontal> createState() => _EstadoRolagemHorizontal();
 }
 
 class _EstadoRolagemHorizontal extends State<RolagemHorizontal> {
-  final _controle = ScrollController();
+  final _proprio = ScrollController();
+
+  ScrollController get _controle => widget.controle ?? _proprio;
 
   @override
   void dispose() {
-    _controle.dispose();
+    _proprio.dispose();
     super.dispose();
   }
 

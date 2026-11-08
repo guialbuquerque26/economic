@@ -3,13 +3,17 @@ import 'dart:async';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'estado_conversa.dart';
 import 'estado_financas.dart';
 import 'formatacao.dart';
 import 'preferencias.dart';
 import 'secoes/componentes.dart';
+import 'secoes/painel_consultor.dart';
+import 'secoes/pin_do_consultor.dart';
 import 'secoes/secao_dicas.dart';
 import 'secoes/secao_evolucao.dart';
 import 'secoes/secao_gastos.dart';
+import 'secoes/secao_investimentos.dart';
 import 'secoes/secao_metricas.dart';
 import 'secoes/secao_movimentacoes.dart';
 import 'secoes/secao_previstas.dart';
@@ -29,6 +33,7 @@ class TelaPrincipal extends StatefulWidget {
     this.email,
     this.perfil = const {},
     this.aoSalvarPerfil,
+    this.lugarDoPin,
   });
 
   final EstadoFinancas estado;
@@ -38,6 +43,9 @@ class TelaPrincipal extends StatefulWidget {
   final Dados perfil;
   final Future<String?> Function(Dados dados)? aoSalvarPerfil;
 
+  /// Onde fica o pin do consultor. Sem ele (nos testes), o lugar vale só enquanto o app está aberto.
+  final PreferenciaLugarDoPin? lugarDoPin;
+
   @override
   State<TelaPrincipal> createState() => _EstadoTelaPrincipal();
 }
@@ -46,7 +54,16 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
   final _chaveDasDicas = GlobalKey();
   Timer? _buscaPeriodica;
 
+  /// Antes da primeira carga ainda não se sabe se há dados: mostrar o convite agora seria enganoso.
+  bool _aberto = false;
+
   EstadoFinancas get _estado => widget.estado;
+
+  late final _conversa = EstadoConversa(_estado.servico);
+  late final _lugarDoPin = widget.lugarDoPin ?? PreferenciaLugarDoPin(null);
+
+  /// O consultor fica por cima do painel, sem escurecer o fundo: dá para ler as dicas enquanto conversa.
+  bool _consultorAberto = false;
 
   @override
   void initState() {
@@ -56,6 +73,7 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
 
   Future<void> _abrir() async {
     await _rodar(_estado.carregar()); // a primeira chamada abre o serviço se ele ainda não estiver rodando
+    if (mounted) setState(() => _aberto = true);
     await _rodar(_estado.carregarConexao());
     await _rodar(_estado.buscarConexao(_perguntarFonte));
     if (mounted) _buscaPeriodica = Timer.periodic(_intervaloDaBusca, (_) => _buscarNoIntervalo());
@@ -69,7 +87,55 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
   @override
   void dispose() {
     _buscaPeriodica?.cancel();
+    _conversa.dispose();
     super.dispose();
+  }
+
+  /// A conversa é uma só: carrega na primeira abertura e continua igual ao trocar de mês.
+  bool _conversaCarregada = false;
+
+  /// Pela seção de investimentos: abre o consultor e, vindo de um card, já envia a pergunta sobre ele.
+  void _perguntarAoConsultor(String? pergunta) {
+    _abrirConsultor();
+    if (pergunta != null) _conversa.perguntar(pergunta);
+  }
+
+  /// Pelo pin ou pelo botão do cartão de dicas. Pelo botão, o pin escondido volta a aparecer.
+  void _abrirConsultor() {
+    _lugarDoPin.esconder(false);
+    setState(() => _consultorAberto = true);
+    if (!_conversaCarregada) {
+      _conversaCarregada = true;
+      _conversa.abrir();
+    }
+  }
+
+  void _fecharConsultor() => setState(() => _consultorAberto = false);
+
+  /// Fica à direita, com 400 de largura; abaixo de [Largura.media] ocupa a janela toda.
+  Widget _consultor(BoxConstraints limites) {
+    final estreita = limites.maxWidth < Largura.media;
+    final painel = Cartao(
+      preenchimento: EdgeInsets.zero,
+      filho: PainelConsultor(estado: _conversa, aoFechar: _fecharConsultor, aberto: _consultorAberto),
+    );
+    return AnimatedSlide(
+      offset: _consultorAberto ? Offset.zero : const Offset(1.1, 0),
+      duration: Movimento.de(context, Movimento.medio),
+      curve: Movimento.saida,
+      child: Visibility(
+        visible: _consultorAberto,
+        maintainState: true,
+        maintainAnimation: true,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: estreita ? EdgeInsets.zero : const EdgeInsets.all(Espaco.medio),
+            child: SizedBox(width: estreita ? limites.maxWidth : 400, child: painel),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<Map<String, String>?> _perguntarFonte(List<Dados> pendentes) async =>
@@ -207,16 +273,39 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
                   aoAbrirConexao: widget.aoSalvarPerfil == null ? null : _abrirConexao,
                   aoAbrirPerfil: widget.aoSalvarPerfil == null ? null : _abrirPerfil,
                   aoSair: widget.aoSair,
+                  lugarDoPin: _lugarDoPin,
                 ),
               ],
               SizedBox(width: margem),
             ],
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(3),
-              child: SizedBox(height: 3, child: ocupado ? const LinearProgressIndicator() : null),
-            ),
+            bottom: BarraDeCarregamento(ativa: ocupado),
           ),
-          body: mes == null ? _semDados(ocupado) : _painel(mes, ocupado, mostrarMes: !mesNoTopo),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              const FundoDeOndas(),
+              AnimatedSwitcher(
+                duration: Movimento.de(context, Movimento.medio),
+                child: switch ((_aberto, mes)) {
+                  (false, _) => const SizedBox.shrink(key: ValueKey('abrindo')),
+                  (_, null) => KeyedSubtree(key: const ValueKey('sem dados'), child: _semDados(ocupado)),
+                  (_, final String mes) => KeyedSubtree(
+                      key: const ValueKey('painel'),
+                      child: _painel(mes, ocupado, mostrarMes: !mesNoTopo),
+                    ),
+                },
+              ),
+              // O pin fica sempre à mão para abrir o consultor; some enquanto ele está aberto.
+              if (mes != null && !_consultorAberto)
+                ListenableBuilder(
+                  listenable: Listenable.merge([_conversa, _lugarDoPin]),
+                  builder: (context, _) => _lugarDoPin.escondido
+                      ? const SizedBox.shrink()
+                      : CamadaDoPin(lugar: _lugarDoPin, pensando: _conversa.pensando, aoAbrir: _abrirConsultor),
+                ),
+              if (mes != null) LayoutBuilder(builder: (context, limites) => _consultor(limites)),
+            ],
+          ),
         );
       },
     );
@@ -272,29 +361,46 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
                 Align(alignment: Alignment.centerLeft, child: _linhaDoMes(mes, ocupado)),
                 const SizedBox(height: Espaco.medio),
               ],
-              SecaoMetricas(
-                resumo: _estado.resumo!,
-                mes: mes,
-                nome: nomeParaExibir(widget.perfil),
-                conselho: conselho,
-                habilitado: !ocupado,
-                aoGerarDicas: () => _rodar(_estado.gerarDicas()),
-                aoVerDicas: _verDicas,
-                aoInformarSaldo: _informarSaldo,
+              EntradaSuave(
+                child: SecaoMetricas(
+                  resumo: _estado.resumo!,
+                  mes: mes,
+                  nome: nomeParaExibir(widget.perfil),
+                  conselho: conselho,
+                  habilitado: !ocupado,
+                  aoGerarDicas: () => _rodar(_estado.gerarDicas()),
+                  aoVerDicas: _verDicas,
+                  aoInformarSaldo: _informarSaldo,
+                ),
               ),
               const SizedBox(height: Espaco.medio),
               _colunasDoMes(mes, ocupado),
               const SizedBox(height: Espaco.medio),
+              EntradaSuave(
+                ordem: 3,
+                child: SecaoInvestimentos(
+                  mercado: _estado.mercado,
+                  erro: _estado.erroDoMercado,
+                  carregando: _estado.carregandoMercado,
+                  sobraDoMes: (_estado.resumo!['sobra_do_mes'] as num?)?.toDouble(),
+                  aoCarregar: (aporte) => _estado.carregarMercado(aporte: aporte),
+                  aoPerguntar: _perguntarAoConsultor,
+                ),
+              ),
+              const SizedBox(height: Espaco.medio),
               if (_estado.previstas.isNotEmpty) ...[
-                SecaoPrevistas(previstas: _estado.previstas),
+                EntradaSuave(ordem: 4, child: SecaoPrevistas(previstas: _estado.previstas)),
                 const SizedBox(height: Espaco.medio),
               ],
-              SecaoMovimentacoes(
-                transacoes: _estado.transacoes,
-                categorias: _estado.categorias,
-                habilitado: !ocupado,
-                aoCorrigir: (id, categoria) => _rodar(_estado.corrigirCategoria(id, categoria)),
-                aoReclassificar: () => _rodar(_estado.reclassificar(), duracao: const Duration(seconds: 8)),
+              EntradaSuave(
+                ordem: 5,
+                child: SecaoMovimentacoes(
+                  transacoes: _estado.transacoes,
+                  categorias: _estado.categorias,
+                  habilitado: !ocupado,
+                  aoCorrigir: (id, categoria) => _rodar(_estado.corrigirCategoria(id, categoria)),
+                  aoReclassificar: () => _rodar(_estado.reclassificar(), duracao: const Duration(seconds: 8)),
+                ),
               ),
             ],
           ),
@@ -312,6 +418,7 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
         mes: mes,
         habilitado: !ocupado,
         aoGerar: () => _rodar(_estado.gerarDicas()),
+        aoConversar: _abrirConsultor,
       ),
     );
     final gastos = SecaoGastos(resumo: _estado.resumo!);
@@ -322,28 +429,34 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        LayoutBuilder(
-          builder: (context, limites) {
-            if (limites.maxWidth < Largura.larga) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [dicas, const SizedBox(height: Espaco.medio), gastos, ...lugares],
+        EntradaSuave(
+          ordem: 1,
+          child: LayoutBuilder(
+            builder: (context, limites) {
+              if (limites.maxWidth < Largura.larga) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [dicas, const SizedBox(height: Espaco.medio), gastos, ...lugares],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [dicas, ...lugares]),
+                  ),
+                  const SizedBox(width: Espaco.medio),
+                  Expanded(child: gastos),
+                ],
               );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [dicas, ...lugares]),
-                ),
-                const SizedBox(width: Espaco.medio),
-                Expanded(child: gastos),
-              ],
-            );
-          },
+            },
+          ),
         ),
         const SizedBox(height: Espaco.medio),
-        SecaoEvolucao(evolucao: _estado.evolucao!, mes: mes, aoEscolherMes: ocupado ? null : _escolherMes),
+        EntradaSuave(
+          ordem: 2,
+          child: SecaoEvolucao(evolucao: _estado.evolucao!, mes: mes, aoEscolherMes: ocupado ? null : _escolherMes),
+        ),
       ],
     );
   }
@@ -370,7 +483,7 @@ class _EstadoTelaPrincipal extends State<TelaPrincipal> {
                       style: textos.titleMedium, textAlign: TextAlign.center),
                   const SizedBox(height: Espaco.pequeno),
                   Text(
-                    'Aceita OFX, CSV, Excel ou PDF de qualquer banco. Se o banco oferecer, prefira o OFX.',
+                    'OFX, CSV, Excel ou PDF de qualquer banco.',
                     style: textos.bodyMedium?.copyWith(color: cores.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
@@ -404,6 +517,7 @@ class _MenuDoUsuario extends StatelessWidget {
     this.aoAbrirConexao,
     this.aoAbrirPerfil,
     this.aoSair,
+    this.lugarDoPin,
   });
 
   final PreferenciaTema tema;
@@ -412,6 +526,9 @@ class _MenuDoUsuario extends StatelessWidget {
   final VoidCallback? aoAbrirConexao;
   final VoidCallback? aoAbrirPerfil;
   final Future<void> Function()? aoSair;
+
+  /// Com o pin escondido, o menu oferece mostrá-lo de novo.
+  final PreferenciaLugarDoPin? lugarDoPin;
 
   static const _opcoes = [
     (ThemeMode.system, 'Automático (igual ao Windows)'),
@@ -455,6 +572,10 @@ class _MenuDoUsuario extends StatelessWidget {
         if (aoAbrirConexao != null) _acao(Icons.account_balance_rounded, 'Conexão com o banco', aoAbrirConexao!),
         if (aoAbrirPerfil != null) ...[
           _acao(Icons.badge_rounded, 'Minhas informações', aoAbrirPerfil!),
+          const PopupMenuDivider(),
+        ],
+        if (lugarDoPin?.escondido ?? false) ...[
+          _acao(Icons.visibility_rounded, 'Mostrar o pin do consultor', () => lugarDoPin!.esconder(false)),
           const PopupMenuDivider(),
         ],
         PopupMenuItem(

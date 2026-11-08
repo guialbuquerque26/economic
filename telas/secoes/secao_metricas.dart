@@ -125,7 +125,7 @@ class SecaoMetricas extends StatelessWidget {
                 label: Text(conselho == null ? 'Gerar dicas do mês' : 'Ver o que fazer'),
               ),
             ),
-            const AvisoDePrivacidade(),
+            if (conselho == null) const AvisoDePrivacidade(),
           ],
         ),
       ],
@@ -152,7 +152,7 @@ class SecaoMetricas extends StatelessWidget {
             Text('Saldo atual', style: textos.labelLarge?.copyWith(color: cores.onSurfaceVariant)),
             ValorAnimado(resumo['saldo_atual'] as num, estilo: textos.headlineSmall),
             Text(
-              informado == null ? 'Informe o saldo atual para este valor ficar exato.' : _origemDoSaldo(informado),
+              informado == null ? 'Saldo estimado.' : _origemDoSaldo(informado),
               style: secundario,
             ),
             MolaAoPressionar(

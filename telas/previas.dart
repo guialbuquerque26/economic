@@ -26,9 +26,9 @@ const Dados exemploResumo = {
 };
 
 const List<Dados> exemploPrevistas = [
-  {'data': '2026-11-17', 'valor': -25.27, 'descricao': 'Loja de roupas', 'parcela': 1, 'total_parcelas': 3},
-  {'data': '2026-11-28', 'valor': -29.33, 'descricao': 'Mercado', 'parcela': 2, 'total_parcelas': 2},
-  {'data': '2026-12-17', 'valor': -25.27, 'descricao': 'Loja de roupas', 'parcela': 2, 'total_parcelas': 3},
+  {'data': '2026-11-17', 'valor': -25.27, 'descricao': 'Loja de roupas', 'banco': 'Nubank', 'parcela': 1, 'total_parcelas': 3},
+  {'data': '2026-11-28', 'valor': -29.33, 'descricao': 'Mercado', 'banco': 'PicPay', 'parcela': 2, 'total_parcelas': 2},
+  {'data': '2026-12-17', 'valor': -25.27, 'descricao': 'Loja de roupas', 'banco': 'Nubank', 'parcela': 2, 'total_parcelas': 3},
 ];
 
 const List<Dados> exemploTransacoes = [
